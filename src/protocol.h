@@ -40,6 +40,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #define KNV_PKG_HDR_SEQ_TAG     4
 #define KNV_PKG_HDR_RET_TAG     7
 #define KNV_PKG_HDR_ERR_TAG     8
+#define KNV_PKG_HDR_LONG_SEQ_TAG	21
 // tags 2001-2999 are reserved for KNV header metas
 #define KNV_PKG_HDR_RSP_ADDR              2001 // all commands support specifying response address
 #define KNV_PKG_HDR_ALLOW_SPLIT           2002 // allow packet splitting when a rsp pakcet excceeds max_pkg_size
@@ -83,6 +84,7 @@ private:
 	uint32_t cmd;       // cmd parsed from header
 	uint32_t subcmd;    // subcmd parsed from header
 	uint64_t seq;       // sequence number
+	uint64_t long_seq;	// sequence number, user oidb head's uint64 seq
 	uint32_t retcode;   // return code
 	uint32_t retmsglen; // return msg len when return code is not 0
 	char    *retmsg;    // return msg
@@ -101,6 +103,7 @@ public:
 	uint32_t GetCommand() const { return cmd; }
 	uint32_t GetSubCommand() const { return subcmd; }
 	uint64_t GetSequence() const { return seq; }
+	uint64_t GetLongSequence() const { return long_seq; }
 	uint32_t GetRetCode() const { return retcode; }
 	string GetRetMsg() const { string s(retmsg, retmsglen); return s; }
 	const KnvNet::KnvSockAddr &GetRspAddr() const { return rspaddr; }
@@ -212,7 +215,7 @@ public:
 	int SetHeaderStringField(uint32_t ftag, uint32_t new_len, char *new_val);
 	int SetCommand(uint32_t new_cmd) { return SetHeaderIntField(KNV_PKG_HDR_CMD_TAG, new_cmd); }
 	int SetSubCommand(uint32_t new_subcmd) { return SetHeaderIntField(KNV_PKG_HDR_SUBCMD_TAG, new_subcmd); }
-	int SetSequence(uint64_t new_seq) { return SetHeaderIntField(KNV_PKG_HDR_SEQ_TAG, new_seq); }
+	int SetSequence(uint64_t new_seq) { return SetHeaderIntField(KNV_PKG_HDR_SEQ_TAG, new_seq) || SetHeaderIntField(KNV_PKG_HDR_LONG_SEQ_TAG, new_seq); }
 	int SetRetCode(uint32_t new_retcode) { return SetHeaderIntField(KNV_PKG_HDR_RET_TAG, new_retcode); }
 	int SetRetErrorMsg(const char *msg, int len) { return SetHeaderStringField(KNV_PKG_HDR_ERR_TAG, len, (char*)msg); }
 	int SetRspAddr(const KnvNet::KnvSockAddr &addr);
@@ -554,42 +557,6 @@ inline int KnvProtocol::EncodeWithBody(KnvNode *b, string &s)
 	return Encode(s, 0, NULL, 0, b);
 }
 
-inline int KnvProtocol::EncodeAll(UcMem *(&mem), bool encode_oidb, bool compat_oidb)
-{
-	if(!IsValid())
-	{
-		errmsg = "Protocol is not initialized";
-		return -1;
-	}
-
-	if(encode_oidb)
-	{
-		if(compat_oidb)
-			return EncodeCompatOidb(mem, body);
-		else
-			return EncodeAllOidb(mem);
-	}
-
-	int sz = tree->EvaluateSize();
-	mem = UcMemManager::Alloc(sz);
-	if(mem==NULL)
-	{
-		errmsg = "UcMemManager::Alloc failed";
-		return -2;
-	}
-
-	if(tree->Serialize((char*)mem->ptr(), sz))
-	{
-		UcMemManager::Free(mem); mem = NULL;
-		errmsg = "Serializing tree failed: ";
-		if(tree->GetErrorMsg())
-			errmsg += tree->GetErrorMsg();
-		else
-			errmsg += "Unknown error";
-		return -3;
-	}
-	return sz;
-}
 
 inline int KnvProtocol::EncodeOidb(string &s)
 {
@@ -619,25 +586,6 @@ inline int KnvProtocol::EncodeCompatOidbWithError(uint32_t ret, const string &er
 inline int KnvProtocol::EncodeCompatOidbWithBody(KnvNode *b, string &s)
 {
 	return Encode(s, 0, NULL, 0, b, true, true);
-}
-
-inline int KnvProtocol::Encode(string &s, uint32_t ret, const char *err, int errlen, KnvNode *body_tree, bool encode_oidb, bool compat_oidb)
-{
-	UcMem *m;
-	int l = Encode(m, ret, err, errlen, body_tree, encode_oidb, compat_oidb);
-	if(l<0)
-		return l;
-	try
-	{
-		s.assign((char*)m->ptr(), l);
-	}
-	catch(...)
-	{
-		errmsg = "out of memory";
-		return -100;
-	}
-	UcMemManager::Free(m);
-	return 0;
 }
 
 // set allow splitting for sending a packet
@@ -675,44 +623,6 @@ inline int KnvProtocol::SetReqSplit(bool allow, uint32_t pkg_sz)
 		errmsg += header->GetErrorMsg();
 		return -3;
 	}
-	return 0;
-}
-
-inline int KnvProtocol::EncodePart(int index, string &s)
-{
-	UcMem *m;
-	int l = EncodePart(index, m);
-	if(l<0)
-		return l;
-	try
-	{
-		s.assign((char*)m->ptr(), l);
-	}
-	catch(...)
-	{
-		errmsg = "out of memory";
-		return -100;
-	}
-	UcMemManager::Free(m);
-	return 0;
-}
-
-inline int KnvProtocol::EncodeAll(string &s, bool encode_oidb, bool compat_oidb)
-{
-	UcMem *m;
-	int l = EncodeAll(m, encode_oidb, compat_oidb);
-	if(l<0)
-		return l;
-	try
-	{
-		s.assign((char*)m->ptr(), l);
-	}
-	catch(...)
-	{
-		errmsg = "out of memory";
-		return -100;
-	}
-	UcMemManager::Free(m);
 	return 0;
 }
 

@@ -29,12 +29,17 @@ namespace knv
 	const char *GetCmdName(uint64_t cmd);
 	const char *GetErrorCodeName(uint64_t errcode);
 
+	map<uint64_t, string> &GetProtoCommandMap();
+	map<uint64_t, string> &GetProtoErrorMap();
 
 	// constructor class for internal use
 	class KnvCommandRegisterer
 	{
 		public:
-			KnvCommandRegisterer(const char *desc, uint64_t val);
+			KnvCommandRegisterer(const char *desc, uint64_t val)
+			{
+				GetProtoCommandMap().insert(make_pair(val, string("abcd")));//desc)));
+			}
 			~KnvCommandRegisterer() {}
 	};
 
@@ -46,7 +51,10 @@ namespace knv
 	class KnvErrorCodeRegisterer
 	{
 		public:
-			KnvErrorCodeRegisterer(const char *desc, uint64_t val);
+			KnvErrorCodeRegisterer(const char *desc, uint64_t val)
+			{
+				GetProtoErrorMap().insert(make_pair(val, string(desc)));
+			}
 			~KnvErrorCodeRegisterer() {}
 	};
 

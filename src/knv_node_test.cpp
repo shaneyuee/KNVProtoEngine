@@ -190,7 +190,7 @@ int MakeReqTree(knv_key_t &k, KnvNode *(&req_tree), KnvNode *(&data_tree), int s
 			if(j%2)
 				guin->InsertIntLeaf(300+j, j);
 			else
-				guin->InsertStrLeaf(300+j, string("f"+to_string(j)).data(), j>9?3:2);
+				guin->InsertStrLeaf(300+j, string("f"+::to_string(j)).data(), j>9?3:2);
 		}
 	}
 

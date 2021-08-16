@@ -37,6 +37,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 #include "knv_node.h"
 #include "obj_pool.h"
+#include "mem_pool.h"
 
 #ifndef PIC
 #define inline __attribute__((always_inline))
@@ -71,7 +72,7 @@ static inline ObjPool<KnvNode> *GetNodePool()
 	}
 }
 
-force_inline char *knv_dynamic_data_t::alloc(uint32_t req_sz)
+char *knv_dynamic_data_t::alloc(uint32_t req_sz)
 {
 	if(req_sz <= sizeof(small_buf)) // use internal small buf if possible
 	{
@@ -102,7 +103,7 @@ force_inline char *knv_dynamic_data_t::alloc(uint32_t req_sz)
 	return data;
 }
 
-force_inline char *knv_dynamic_data_t::assign(UcMem *m, uint32_t size)
+char *knv_dynamic_data_t::assign(UcMem *m, uint32_t size)
 {
 	if(mem)
 	{
@@ -121,7 +122,7 @@ force_inline char *knv_dynamic_data_t::assign(UcMem *m, uint32_t size)
 	return NULL;
 }
 
-force_inline void knv_dynamic_data_t::free()
+void knv_dynamic_data_t::free()
 {
 	if(mem)
 	{
@@ -132,7 +133,10 @@ force_inline void knv_dynamic_data_t::free()
 	sz = 0;
 }
 
-static force_inline uint32_t get_keyhash(knv_tag_t t, const char *k, int len, int sz)
+// don't use "-O3" gcc option for function:get_keyhash, preventing the operation:" t += *(uint32_t*)k; " coredump.
+#pragma GCC push_options
+#pragma GCC optimize("O0")
+static uint32_t get_keyhash(knv_tag_t t, const char *k, int len, int sz)
 {
 	if(len>0)
 	{
@@ -144,6 +148,7 @@ static force_inline uint32_t get_keyhash(knv_tag_t t, const char *k, int len, in
 	}
 	return t&(sz-1); // t%sz, sz should be power of 2
 }
+#pragma GCC pop_options
 
 
 KnvHt::KnvHt() : nr(0), mem(NULL)
@@ -159,7 +164,7 @@ KnvHt::~KnvHt()
 		UcMemManager::Free(mem);
 }
 
-force_inline void KnvHt::clear()
+void KnvHt::clear()
 {
 	nr = 0;
 	if(mem)
@@ -185,7 +190,7 @@ force_inline void KnvHt::clear()
 #define SET_BIT(bm, bit) (bm)[(bit)/8] |= (1<<((bit)%8))
 #define CLEAR_BIT(bm, bit) (bm)[(bit)/8] &= (~(1<<((bit)%8))
 
-inline KnvNode *KnvHt::get(knv_tag_t tag, const char *k, int klen)
+KnvNode *KnvHt::get(knv_tag_t tag, const char *k, int klen)
 {
 	uint32_t hi = get_keyhash(tag, k, klen, sz);
 
@@ -202,7 +207,7 @@ inline KnvNode *KnvHt::get(knv_tag_t tag, const char *k, int klen)
 	return NULL;
 }
 
-inline KnvNode *KnvHt::get(knv_tag_t tag, const char *k, int klen, HtPos &pos)
+KnvNode *KnvHt::get(knv_tag_t tag, const char *k, int klen, HtPos &pos)
 {
 	uint32_t hi = get_keyhash(tag, k, klen, sz);
 
@@ -229,7 +234,7 @@ inline KnvNode *KnvHt::get(knv_tag_t tag, const char *k, int klen, HtPos &pos)
 static const int ht_levels[] = { 256, 8192 };
 #define biggest_level                 8192
 
-inline int KnvHt::increase()
+int KnvHt::increase()
 {
 	if(sz >= biggest_level) // no increasing again
 		return 0;
@@ -298,7 +303,7 @@ inline int KnvHt::increase()
 }
 
 
-inline int KnvHt::put(KnvNode *n)
+int KnvHt::put(KnvNode *n)
 {
 	if(nr+1 > sz)
 	{
@@ -323,14 +328,14 @@ inline int KnvHt::put(KnvNode *n)
 	return 0;
 }
 
-inline int KnvHt::remove(KnvNode *node, HtPos pos)
+int KnvHt::remove(KnvNode *node, HtPos pos)
 {
 	*pos = node->ht_next;
 	nr --;
 	return 0;
 }
 
-inline int KnvHt::remove(KnvNode *node)
+int KnvHt::remove(KnvNode *node)
 {
 	KnvNode *c;
 	uint32_t hi = get_keyhash(node->tag, node->key.val, node->key.len, sz);
@@ -356,7 +361,7 @@ inline int KnvHt::remove(KnvNode *node)
 }
 
 
-force_inline int knv_key_t::init(knv_type_t ktype, const knv_value_t *kval, bool own_buf)
+int knv_key_t::init(knv_type_t ktype, const knv_value_t *kval, bool own_buf)
 {
 	if(kval) // has key
 	{
@@ -415,7 +420,7 @@ KnvNode::~KnvNode()
 // InitNode is the only initialization entry for KnvNode
 // If you add new members to KnvNode, please make sure to initialize them here
 //
-inline int KnvNode::InitNode(knv_tag_t _tag, knv_type_t _type, const knv_value_t *value, bool own_buf, bool update_eval, int field_sz, bool force_no_key)
+int KnvNode::InitNode(knv_tag_t _tag, knv_type_t _type, const knv_value_t *value, bool own_buf, bool update_eval, int field_sz, bool force_no_key)
 {
 	uint32_t str_len = 0;
 	tag = _tag;
@@ -508,7 +513,7 @@ inline int KnvNode::InitNode(knv_tag_t _tag, knv_type_t _type, const knv_value_t
 	return 0;
 }
 
-inline void KnvNode::ReleaseNode()
+void KnvNode::ReleaseNode()
 {
 	// Most initializations are performed when a node is reused
 	subnode_dirty = false;
@@ -522,7 +527,7 @@ inline void KnvNode::ReleaseNode()
 	KnvLeaf::ReleaseObject();
 }
 
-inline int KnvNode::ReleaseKnvNodeList(KnvNode *&list)
+int KnvNode::ReleaseKnvNodeList(KnvNode *&list)
 {
 	//
 	// here we use list concatenation to aviod recursion
@@ -581,7 +586,7 @@ void KnvNode::ReleaseObject()
 	ReleaseNode();
 }
 
-KnvNode *KnvNode::New(const char *data, int data_len, bool own_buf)
+KnvNode *KnvNode::New(const char *data, int data_len, bool own_buf, bool force_no_key)
 {
 	knv_field_t f, *pf;
 
@@ -608,7 +613,7 @@ KnvNode *KnvNode::New(const char *data, int data_len, bool own_buf)
 		return NULL;
 	}
 
-	if(n->InitNode(pf->tag, pf->type, &pf->val, own_buf, true, real_len))
+	if(n->InitNode(pf->tag, pf->type, &pf->val, own_buf, true, real_len, force_no_key))
 	{
 		errorstr = n->errmsg;
 		nodepool->Delete(n);
@@ -620,7 +625,7 @@ KnvNode *KnvNode::New(const char *data, int data_len, bool own_buf)
 
 
 KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type,
-		knv_type_t _keytype, const knv_value_t *_key, const knv_value_t *_val, bool own_buf)
+		knv_type_t _keytype, const knv_value_t *_key, const knv_value_t *_val, bool own_buf, bool force_no_key)
 {
 	// 初始化 nodepool 只在New的时候检查，其它地方不做检查
 	if(GetNodePool()==NULL)
@@ -643,14 +648,14 @@ KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type,
 		return NULL;
 	}
 
-	if(n->InitNode(_tag, _type, _val, own_buf))
+	if(n->InitNode(_tag, _type, _val, own_buf, true, 0, force_no_key))
 	{
 		errorstr = n->errmsg;
 		nodepool->Delete(n);
 		return NULL;
 	}
 
-	if(_key)
+	if(force_no_key==false && _key)
 	{
 		if(n->key.init(_keytype, _key, own_buf))
 		{
@@ -670,6 +675,18 @@ KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type,
 		}
 	}
 	return n;
+}
+
+KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type, UcMem *val, int length, bool force_no_key)
+{
+	knv_value_t v;
+	v.str.len = length;
+	v.str.data = (char*)val->ptr();
+	KnvNode *p = KnvNode::New(_tag, _type, KNV_DEFAULT_TYPE, NULL, &v, false, force_no_key);
+	if(p==NULL)
+		return NULL;
+	p->dyn_data.assign(val, length);
+	return p;
 }
 
 int KnvNode::SetKey(knv_type_t _keytype, const knv_value_t *_key, bool own_buf)
@@ -712,7 +729,7 @@ out:
 	return ret;
 }
 
-inline KnvNode *KnvNode::InnerDuplicate(bool own_buf, bool force_no_key)
+KnvNode *KnvNode::InnerDuplicate(bool own_buf, bool force_no_key)
 {
 	knv_value_t v;
 	UcMem *m = NULL;
@@ -780,10 +797,10 @@ KnvNode *KnvNode::Duplicate(bool own_buf)
 		errmsg = "Invalid node";
 		return NULL;
 	}
-	return InnerDuplicate(own_buf, false);
+	return InnerDuplicate(own_buf, no_key);
 }
 
-inline KnvNode *KnvNode::DupEmptyNode()
+KnvNode *KnvNode::DupEmptyNode()
 {
 	KnvNode *n = nodepool->New();
 	if(n==NULL)
@@ -792,7 +809,7 @@ inline KnvNode *KnvNode::DupEmptyNode()
 		return NULL;
 	}
 
-	if(n->InitNode(tag, type, NULL, false, false))
+	if(n->InitNode(tag, type, NULL, false, false, 0, no_key))
 	{
 		errmsg = n->errmsg;
 		nodepool->Delete(n);
@@ -813,14 +830,14 @@ void KnvNode::Delete(KnvNode *tree)
 	if(tree) nodepool->Delete(tree);
 }
 
-inline void KnvNode::InitChildList(int childnum)
+void KnvNode::InitChildList(int childnum)
 {
 	child_num = childnum;
 	childlist = NULL;
 	metalist = NULL;
 }
 
-inline int KnvNode::InnerExpand(bool force_no_key)
+int KnvNode::InnerExpand(bool force_no_key)
 {
 	if(IsExpanded()) // already expanded, nothing to do
 		return 0;
@@ -831,9 +848,13 @@ inline int KnvNode::InnerExpand(bool force_no_key)
 	if(type!=KNV_NODE) // leaf, cannot be expanded
 		return 0;
 
+	// force children to have no key when parent forced no key
+	if(no_key)
+		force_no_key = true;
+
 	// if this is tag 1, and parent has key, this node is probably a key
-	// in this case, we assume it is non-expansible
-	if(tag==1 && parent && parent->key.len)
+	// in this case, we assume it is non-expandable
+	if(tag==1 && no_key==false && parent && parent->key.len)
 		return 0;
 
 	knv_field_t f, *pf;
@@ -927,7 +948,7 @@ int KnvNode::Expand()
 		return -1;
 	}
 
-	return InnerExpand(false);
+	return InnerExpand(no_key);
 }
 
 
@@ -1507,7 +1528,7 @@ KnvNode *KnvNode::GetMeta(knv_tag_t _tag)
 
 
 
-inline int KnvNode::UpdateParentEvalueAndSetDirty(int offset)
+int KnvNode::UpdateParentEvalueAndSetDirty(int offset)
 {
 	bool updatedirty = true;
 	bool updateeval = (offset!=0);
@@ -1593,7 +1614,7 @@ int KnvNode::SetMeta(knv_tag_t _tag, knv_type_t _type, const knv_value_t *_data,
 		{
 			if(_type==KNV_STRING && own_buf)
 			{
-				m->val.str.data = dyn_data.alloc(_data->str.len);
+				m->val.str.data = m->dyn_data.alloc(_data->str.len);
 				if(m->val.str.data==NULL)
 				{
 					m->val.str.len = 0;
@@ -1628,7 +1649,7 @@ int KnvNode::SetMeta(knv_tag_t _tag, knv_type_t _type, const knv_value_t *_data,
 	// internal call, no need to set dirty and update parent status
 	if(!update_parent)
 	{
-		eval_val_sz += knv_eval_field_length(_tag, _type, &m->val) - old_sz;
+		eval_val_sz += m->eval_sz - old_sz;
 		return 0;
 	}
 
@@ -1809,7 +1830,7 @@ do {                                                                    \
 	(p)->child_num ++;                                              \
 } while(0)
 
-inline int KnvNode::InnerInsertChild(KnvNode *child, bool take_ownership, bool own_buf, bool update_parent, bool at_tail)
+int KnvNode::InnerInsertChild(KnvNode *child, bool take_ownership, bool own_buf, bool update_parent, bool at_tail)
 {
 	if(!take_ownership) // if we donot have ownership, clone one
 	{

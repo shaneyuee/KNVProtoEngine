@@ -83,7 +83,12 @@ pb_field_t *pb_next(pb_field_t *f);
 static inline pb_field_t *pb_end() { return NULL; }
 int pb_skip_field(pb_field_t *f, pb_type_t wire_type); // skip one specific field
 
-
+// functions for raw access to contents
+pb_field_t *pb_rawinit(pb_field_t *f, const void *data, int dlen);
+int pb_decode_varint(pb_field_t *f);
+int pb_decode_fixed32(pb_field_t *f);
+int pb_decode_fixed64(pb_field_t *f);
+int pb_decode_string(pb_field_t *f);
 
 typedef struct 
 {

@@ -14,12 +14,14 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #include <map>
 
 #include "knv_codec.h"
+#include "mem_pool.h"
 #include "protocol.h"
 
 #define INIT_HEADER_INFO() do{ \
 	cmd = 0; \
 	subcmd = 0; \
 	seq = 0; \
+	long_seq = 0; \
 	retcode = 0; \
 	retmsglen = 0; \
 	retmsg = NULL; \
@@ -63,6 +65,8 @@ Unless required by applicable law or agreed to in writing, software distributed 
 		{\
 			seq = m->GetValue().i64;\
 		}\
+\
+		long_seq = header->GetFieldInt(KNV_PKG_HDR_LONG_SEQ_TAG);\
 \
 		m = header->FindChildByTag(KNV_PKG_HDR_RSP_ADDR);\
 		if(m && m->GetType()==KNV_STRING && \
@@ -369,6 +373,7 @@ KnvProtocol::KnvProtocol(uint32_t dwCmd, uint32_t dwSubCmd, uint32_t dwSeq): \
 		cmd = dwCmd;
 		subcmd = dwSubCmd;
 		seq = dwSeq;
+		long_seq = dwSeq;
 	}
 	return;
 failure:
@@ -612,6 +617,7 @@ int KnvProtocol::SetHeaderIntField(uint32_t ftag, uint64_t new_val)
 	case KNV_PKG_HDR_CMD_TAG: cmd = new_val; break;
 	case KNV_PKG_HDR_SUBCMD_TAG: subcmd = new_val; break;
 	case KNV_PKG_HDR_SEQ_TAG: seq = new_val; break;
+	case KNV_PKG_HDR_LONG_SEQ_TAG: long_seq = new_val; break;
 	case KNV_PKG_HDR_RET_TAG: retcode = new_val; break;
 	default: break;
 	}
@@ -998,6 +1004,100 @@ int KnvProtocol::EncodePart(int index, UcMem *(&mem))
 	return EncodeWithBody(b, mem);
 }
 
+int KnvProtocol::Encode(string &s, uint32_t ret, const char *err, int errlen, KnvNode *body_tree, bool encode_oidb, bool compat_oidb)
+{
+	UcMem *m;
+	int l = Encode(m, ret, err, errlen, body_tree, encode_oidb, compat_oidb);
+	if(l<0)
+		return l;
+	try
+	{
+		s.assign((char*)m->ptr(), l);
+	}
+	catch(...)
+	{
+		errmsg = "out of memory";
+		return -100;
+	}
+	UcMemManager::Free(m);
+	return 0;
+}
+
+int KnvProtocol::EncodeAll(UcMem *(&mem), bool encode_oidb, bool compat_oidb)
+{
+	if(!IsValid())
+	{
+		errmsg = "Protocol is not initialized";
+		return -1;
+	}
+
+	if(encode_oidb)
+	{
+		if(compat_oidb)
+			return EncodeCompatOidb(mem, body);
+		else
+			return EncodeAllOidb(mem);
+	}
+
+	int sz = tree->EvaluateSize();
+	mem = UcMemManager::Alloc(sz);
+	if(mem==NULL)
+	{
+		errmsg = "UcMemManager::Alloc failed";
+		return -2;
+	}
+
+	if(tree->Serialize((char*)mem->ptr(), sz))
+	{
+		UcMemManager::Free(mem); mem = NULL;
+		errmsg = "Serializing tree failed: ";
+		if(tree->GetErrorMsg())
+			errmsg += tree->GetErrorMsg();
+		else
+			errmsg += "Unknown error";
+		return -3;
+	}
+	return sz;
+}
+
+int KnvProtocol::EncodePart(int index, string &s)
+{
+	UcMem *m;
+	int l = EncodePart(index, m);
+	if(l<0)
+		return l;
+	try
+	{
+		s.assign((char*)m->ptr(), l);
+	}
+	catch(...)
+	{
+		errmsg = "out of memory";
+		return -100;
+	}
+	UcMemManager::Free(m);
+	return 0;
+}
+
+int KnvProtocol::EncodeAll(string &s, bool encode_oidb, bool compat_oidb)
+{
+	UcMem *m;
+	int l = EncodeAll(m, encode_oidb, compat_oidb);
+	if(l<0)
+		return l;
+	try
+	{
+		s.assign((char*)m->ptr(), l);
+	}
+	catch(...)
+	{
+		errmsg = "out of memory";
+		return -100;
+	}
+	UcMemManager::Free(m);
+	return 0;
+}
+
 #include "commands.h"
 
 int KnvProtocol::Print(const string &prefix, ostream &outstr)
@@ -1012,6 +1112,7 @@ int KnvProtocol::Print(const string &prefix, ostream &outstr)
 	outstr << "[#] cmd=" << knv::GetCmdName(cmd);
 	outstr << ", subcmd=" << subcmd;
 	outstr << ", seq="<< seq;
+	outstr << ", long_seq="<< long_seq;
 	if(rspaddr.addr_len>0)
 		outstr << ", rspaddr="<<rspaddr.to_str_with_port();
 	outstr << ", retcode="<< knv::GetErrorCodeName(retcode);

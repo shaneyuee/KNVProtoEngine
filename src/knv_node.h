@@ -32,14 +32,11 @@ Unless required by applicable law or agreed to in writing, software distributed 
 
 #include "knv_codec.h"
 #include "obj_base.h"
-#include "mem_pool.h"
 #include <string>
 #include <ostream>
 #include <iostream>
 #include <vector>
 #include <stdint.h>
-
-
 
 using namespace std;
 
@@ -52,6 +49,7 @@ using namespace std;
 
 typedef knv_field_val_t knv_value_t;
 typedef uint32_t knv_tag_t;
+class UcMem;
 
 class knv_dynamic_data_t // data struct for dynamically allocated data
 {
@@ -67,7 +65,6 @@ private:
 	UcMem *mem;
 	char small_buf[64];
 };
-
 
 class knv_key_t
 {
@@ -242,6 +239,8 @@ private:
 	KnvNode *DupEmptyNode();
 	int InnerRemoveMeta(knv_tag_t _tag);
 	int ReleaseKnvNodeList(KnvNode *&list);
+	// parse the current field as packed repeated ints
+	template<typename T> int GetPackedRepeatedInt(vector<T>& vals);
 
 public: // constructors
 	// construct from a KNV(one-field string) message, a KNV message is like
@@ -257,24 +256,26 @@ public: // constructors
 	//    own_buf           -- true:  inner buffer is allocated to store node data
 	//                         false: external buffer from data/bin is used
 	//                                the caller should make sure that buffer is available through knvnode's life-cycle
+	//    force_no_key      -- true:  the node and subnodes will not keep key(tag=1) and could not be identified by key
+	//                         false: all nodes are identified by tag+key but subnode with tag=1 can not be expended
 	// returns:
 	//    success -- a node representing a knv_node
 	//    failure -- NULL is returned, call KnvNode::GetGlobalErrorMsg() to get the error message
-	static KnvNode *New(const char *data, int data_len, bool own_buf=true);
-	static KnvNode *New(const string &bin, bool own_buf=true);
+	static KnvNode *New(const char *data, int data_len, bool own_buf=true, bool force_no_key=false);
+	static KnvNode *New(const string &bin, bool own_buf=true, bool force_no_key=false);
 	// construct from given tag/key/val
 	static KnvNode *New(knv_tag_t _tag, knv_type_t _type, knv_type_t _keytype,
-			const knv_value_t *_key, const knv_value_t *_val, bool own_buf=true);
+			const knv_value_t *_key, const knv_value_t *_val, bool own_buf=true, bool force_no_key=false);
 	static KnvNode *New(knv_tag_t _tag, knv_type_t _type, const knv_key_t &_key,
-			const knv_value_t *_val, bool own_buf=true);
+			const knv_value_t *_val, bool own_buf=true, bool force_no_key=false);
 	// the easiest way to construct an empty tree
-	static KnvNode *NewTree(knv_tag_t _tag, const knv_key_t *_key=NULL);
+	static KnvNode *NewTree(knv_tag_t _tag, const knv_key_t *_key=NULL, bool force_no_key=false);
 	// construct from a leaf
-	static KnvNode *New(const KnvLeaf &l, bool own_buf=true);
-	static KnvNode *New(knv_tag_t _tag, knv_type_t _type, UcMem *val, int length);
+	static KnvNode *New(const KnvLeaf &l, bool own_buf=true, bool force_no_key=false);
+	static KnvNode *New(knv_tag_t _tag, knv_type_t _type, UcMem *val, int length, bool force_no_key=false);
 	// construct from PB message string, you can optionally specify a tag for the node
 	// Note: if you wish to get this message back, call GetValue() instead of Serialize()
-	static KnvNode *NewFromMessage(const string &msg, knv_tag_t _tag=1);
+	static KnvNode *NewFromMessage(const string &msg, knv_tag_t _tag=1, bool force_no_key=false);
 
 	// Delete a tree
 	// <<Warning>>: user SHOULD NOT delete a child node in a tree
@@ -302,6 +303,7 @@ public: // methods
 public: // API for data operations
 	const KnvLeaf *GetValue(); // fold(), return a leaf representing data
 	uint64_t GetIntVal(); // get value as an int, returns 0 for non-int type
+	float GetFloatVal() { uint64_t v = GetIntVal(); return *(float*)&v; }
 	string GetStrVal(); // get value as a string, return empty string for non-string type
 	int Serialize(string &out); // fold(), return a buffer representing the whole knv tree
 	int Serialize(char *buf, int &len, bool with_header = true); // serialize to user given buffer (also pack tag if with_header=true)
@@ -410,44 +412,44 @@ public: // API for data operations
 	KnvNode *GetFirstField(knv_tag_t _tag=0);
 	KnvNode *GetNextField(KnvNode *cur, knv_tag_t _tag=0);
 
-	//对比函数, 与pstNode进行比较
-	//如果本Node的数据在pstCmpNode都存在且相等, 则nRetCode返回0, 函数返回NULL
-	//如果本Node的数据在pstCmdNode不存在, 或者不相等, 则nRetCode返回0, 函数返回不相等的树
-	//如果nRetCode返回1, 说明创建树失败, 函数返回NULL
+	// Compare current tree with pstNode
+	// If all sub nodes exist in pstNode with same data, nRetCode reutrns 0 and this function returns NULL,
+	// otherwist the function returns add diff-tree and nRetCode set to 0.
+	// If any error occurs nRetCode is set to 1.
 	KnvNode *Compare(KnvNode *pstNode, int &nRetCode);
 public:
 	// operations between trees
 
-	// 根据请求树构造并返回对应的数据树，同时返回由无效请求构成的树
-	// 请求树的定义：
-	//    是一棵普通的树，但：
-	//      不一定有key，如果没有指定key，匹配所有tag相同的节点
-	//      如果节点为int类型，表示是否请求tag对应节点的数据
-	//      如果节点为Node，但没有子节点，表示请求这个节点下所有的子节点
-	// 返回：
-	//    out_tree -- 存储返回数据的tree,数据部分指向 this，调用者必须保证out_tree先于this被释放
-	//    empty_req_tree -- 存储无效请求的请求树,数据指向req_tree，必须先于req_tree被释放掉
-	//    这两棵树用完后必须用KnvNode::Delete(tree)删除
-	// 返回码：
-	//    0  成功
-	//    <0 失败
+	// Get sub-tree based on coresponding request tree req_tree, and also return missed request tree in empty_req_tree.
+	// Request tree definition:
+	//     It is a normal KNV tree, except:
+	//         1) Each node has or has no key, if has, the tag and key pair are used to match the same tag+key in data tree.
+	//         2) If one node has no key, only tag is used for matching, ignoring keys in all data nodes.
+	//         3) If one node is int type, its value (must be 0 or 1) indicates whether to return the matched data node.
+	//         4) If one node is Node type, but has no child, it means match all subnodes matching tag+key or tag if key is abscent.
+	// Return:
+	//     out_tree - matched data tree, note that all data buffers are still owned by the current tree and out_tree could not be used outside the lifescope of current tree.
+	//     empty_req_tree - unmatched request tree.
+	// The caller is responsible for releasing these two generated trees by calling KnvNode::Delete(tree).
+	//
+	// Return code:
+	//     0 - Success
+	//     <0 - Failure
 	int GetSubTree(KnvNode *req_tree, KnvNode *(&out_tree), KnvNode *(&empty_req_tree), bool no_empty = false);
 
-	// 用于根据变化的节点淘汰数据
-	// 返回：
-	//    match_req_tree -- 存储节点匹配的请求tree，是req_tree的一部分，用于回填使用
-	// 返回码：
-	//    1  成功：删除整棵树（不做任何操作，由上层删除）
-	//    0  成功：删除部分子节点
-	//    <0 失败
+	// Delete the coresponding sub tree matched by req_tree.
+	// Return:
+	//     match_req_tree - matched part of req_tree, may be equal to req_tree if fully matched.
+	// Return code:
+	//    1 - success, but the whole tree is deleted, nothing is done and the deletion is left to the caller.
+	//    0 - success, part of the tree is deleted
+	//    <0 - failure
 	int DeleteSubTree(KnvNode *req_tree, KnvNode *(&match_req_tree), int depth=0);
 
-	// 根据已有的数据树来更新当前的树，更新步骤：
-	//    如果有相同节点，则覆盖原来的节点
-	//    否则，插入新的节点
-	// 参数：
-	//    update_tree -- 用于更新的数据树
-	//    max_level   -- 展开的最大深度，大于或等于这个层次时，更新整个节点，不再展开
+	// Merge the update_tree to the current tree, insert new subnodes if neccessary.
+	// Parameters:
+	//    update_tree - the new sub-tree used to update
+	//    max_level - the max expanding level, if the max level is reached, no longer expand and update all matched sub trees
 	int UpdateSubTree(KnvNode *update_tree, int max_level);
 
 	KnvNode *MakeRequestTree(int max_level);
@@ -465,44 +467,32 @@ private:
 
 // inline methods put here
 
-inline KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type, UcMem *val, int length)
+inline KnvNode *KnvNode::New(const string &bin, bool own_buf, bool force_no_key)
 {
-	knv_value_t v;
-	v.str.len = length;
-	v.str.data = (char*)val->ptr();
-	KnvNode *p = KnvNode::New(_tag, _type, KNV_DEFAULT_TYPE, NULL, &v, false);
-	if(p==NULL)
-		return NULL;
-	p->dyn_data.assign(val, length);
-	return p;
+	return KnvNode::New(bin.c_str(), bin.length(), own_buf, force_no_key);
 }
 
-inline KnvNode *KnvNode::New(const string &bin, bool own_buf)
+inline KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type, const knv_key_t &_key, const knv_value_t *_val, bool own_buf, bool force_no_key)
 {
-	return KnvNode::New(bin.c_str(), bin.length(), own_buf);
+	return KnvNode::New(_tag, _type, _key.type, &_key.GetValue(), _val, own_buf, force_no_key);
 }
 
-inline KnvNode *KnvNode::New(knv_tag_t _tag, knv_type_t _type, const knv_key_t &_key, const knv_value_t *_val, bool own_buf)
+inline KnvNode *KnvNode::NewTree(knv_tag_t _tag, const knv_key_t *_key, bool force_no_key)
 {
-	return KnvNode::New(_tag, _type, _key.type, &_key.GetValue(), _val, own_buf);
+	return KnvNode::New(_tag, KNV_NODE, _key? _key->type:KNV_DEFAULT_TYPE, _key? &_key->GetValue() : NULL, NULL, true, force_no_key);
 }
 
-inline KnvNode *KnvNode::NewTree(knv_tag_t _tag, const knv_key_t *_key)
+inline KnvNode *KnvNode::New(const KnvLeaf &l, bool own_buf, bool force_no_key)
 {
-	return KnvNode::New(_tag, KNV_NODE, _key? _key->type:KNV_DEFAULT_TYPE, _key? &_key->GetValue() : NULL, NULL, true);
+	return KnvNode::New(l.GetTag(), l.GetType(), KNV_DEFAULT_TYPE, NULL, &l.GetValue(), own_buf, force_no_key);
 }
 
-inline KnvNode *KnvNode::New(const KnvLeaf &l, bool own_buf)
-{
-	return KnvNode::New(l.GetTag(), l.GetType(), KNV_DEFAULT_TYPE, NULL, &l.GetValue(), own_buf);
-}
-
-inline KnvNode *KnvNode::NewFromMessage(const string &msg, knv_tag_t _tag)
+inline KnvNode *KnvNode::NewFromMessage(const string &msg, knv_tag_t _tag, bool force_no_key)
 {
 	knv_value_t v;
 	v.str.len = msg.length();
 	v.str.data = (char*)msg.data();
-	return KnvNode::New(_tag, KNV_STRING, KNV_STRING, NULL, &v, true);
+	return KnvNode::New(_tag, KNV_STRING, KNV_STRING, NULL, &v, true, force_no_key);
 }
 
 inline bool KnvNode::IsMatch(knv_tag_t t, const char *k, int klen)
@@ -518,7 +508,7 @@ inline int KnvNode::SetValue(knv_type_t _type, const knv_value_t &new_val, bool 
 inline KnvNode *KnvNode::InsertChild(knv_tag_t _tag, knv_type_t _type, const knv_value_t *_data, bool own_buf)
 {
 	KnvNode *c;
-	if((c=KnvNode::New(_tag, _type, KNV_DEFAULT_TYPE, NULL, _data, own_buf))==NULL)
+	if((c=KnvNode::New(_tag, _type, KNV_DEFAULT_TYPE, NULL, _data, own_buf, no_key))==NULL)
 	{
 		errmsg = GetGlobalErrorMsg();
 		return NULL;
@@ -534,7 +524,7 @@ inline KnvNode *KnvNode::InsertChild(knv_tag_t _tag, knv_type_t _type, const knv
 inline KnvNode *KnvNode::InsertChild(knv_tag_t _tag, knv_type_t _type, const knv_key_t &_key, const knv_value_t *_data, bool own_buf)
 {
 	KnvNode *c;
-	if((c=KnvNode::New(_tag,_type,_key,_data,own_buf))==NULL)
+	if((c=KnvNode::New(_tag, _type, _key, _data, own_buf, no_key))==NULL)
 	{
 		errmsg = GetGlobalErrorMsg();
 		return NULL;
@@ -550,7 +540,7 @@ inline KnvNode *KnvNode::InsertChild(knv_tag_t _tag, knv_type_t _type, const knv
 inline KnvNode *KnvNode::InsertSubNode(knv_tag_t _tag, const knv_key_t *_key)
 {
 	KnvNode *c;
-	if((c=KnvNode::NewTree(_tag,_key))==NULL)
+	if((c=KnvNode::NewTree(_tag, _key, no_key))==NULL)
 	{
 		errmsg = GetGlobalErrorMsg();
 		return NULL;
@@ -761,13 +751,65 @@ inline KnvNode *KnvNode::GetField(knv_tag_t _tag)
 		return FindChildByTag(_tag);
 }
 
+inline int pb_decode_allint(pb_field_t *field, uint64_t &val)
+{
+	int ret = pb_decode_varint(field);
+	if(ret==0)
+		val = field->val.i64;
+	return ret;
+}
+inline int pb_decode_allint(pb_field_t *field, float &val)
+{
+	int ret = pb_decode_fixed32(field);
+	if(ret==0)
+		val = *(float*)&field->val.i32;
+	return ret;
+}
+inline int pb_decode_allint(pb_field_t *field, double &val)
+{
+	int ret = pb_decode_fixed64(field);
+	if(ret==0)
+		val = *(double*)&field->val.i64;
+	return ret;
+}
+
+template<typename T> inline int KnvNode::GetPackedRepeatedInt(vector<T>& vals)
+{
+	// packed ints have type of KNV_STRING
+	if(GetType()!=KNV_STRING)
+		return 0;
+
+	int nr = 0;
+	// packed repeated ints for pb3
+	// decode them
+	const knv_value_t &v = GetValue()->GetValue();
+	if(v.str.len && v.str.data)
+	{
+		pb_field_t field;
+		pb_rawinit(&field, v.str.data, v.str.len);
+		T val = 0;
+		while(pb_decode_allint(&field, val)==0)
+		{
+			//got f.i64
+			vals.push_back(val);
+			nr ++;
+		}
+	}
+	return nr;
+}
+
 inline int KnvNode::GetFieldsInt(knv_tag_t _tag, vector<uint64_t>& vals)
 {
 	int nr = 0;
 	KnvNode *f = GetFirstField(_tag);
 	while(f)
 	{
-		if(f->type!=KNV_STRING)
+		// packed repeated ints are packed one or more fields of type KNV_STRING
+		if(f->type==KNV_STRING)
+		{
+			nr += f->GetPackedRepeatedInt(vals);
+		}
+		else if(f->type != KNV_STRING)
 		{
 			vals.push_back(f->val.i64);
 			nr ++;
@@ -783,7 +825,16 @@ inline int KnvNode::GetFieldsSInt(knv_tag_t _tag, vector<int64_t>& vals)
 	KnvNode *f = GetFirstField(_tag);
 	while(f)
 	{
-		if(f->type==KNV_VARINT)
+		// packed repeated ints are packed into one or more fields of type KNV_STRING
+		if(f->type==KNV_STRING)
+		{
+			vector<uint64_t> uvals;
+			f->GetPackedRepeatedInt(uvals);
+			for(vector<uint64_t>::iterator it = uvals.begin(); it != uvals.end(); it++)
+				vals.push_back(pb_uint2int(*it));
+			nr += uvals.size();
+		}
+		else if(f->type==KNV_VARINT)
 		{
 			vals.push_back(pb_uint2int(f->val.i64));
 			nr ++;
@@ -799,7 +850,12 @@ inline int KnvNode::GetFieldsFloat(knv_tag_t _tag, vector<float>& vals)
 	KnvNode *f = GetFirstField(_tag);
 	while(f)
 	{
-		if(f->type==KNV_FIXED32)
+		// packed repeated ints are packed one or more fields of type KNV_STRING
+		if(f->type==KNV_STRING)
+		{
+			nr += f->GetPackedRepeatedInt(vals);
+		}
+		else if(f->type==KNV_FIXED32)
 		{
 			float ft;
 			*(uint32_t*)&ft = f->val.i32;
@@ -817,7 +873,12 @@ inline int KnvNode::GetFieldsDouble(knv_tag_t _tag, vector<double>& vals)
 	KnvNode *f = GetFirstField(_tag);
 	while(f)
 	{
-		if(f->type==KNV_FIXED64)
+		// packed repeated ints are packed one or more fields of type KNV_STRING
+		if(f->type==KNV_STRING)
+		{
+			nr += f->GetPackedRepeatedInt(vals);
+		}
+		else if(f->type==KNV_FIXED64)
 		{
 			double db;
 			*(uint64_t*)&db = f->val.i64;

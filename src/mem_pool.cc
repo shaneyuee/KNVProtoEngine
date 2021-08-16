@@ -14,6 +14,11 @@ Unless required by applicable law or agreed to in writing, software distributed 
 #include <iostream>
 #include "mem_pool.h"
 
+#ifdef HAS_ATTR_API
+extern "C" int Attr_API(int attr, int val);
+#else
+extern "C" int Attr_API(int attr, int val) { return 0; }
+#endif
 
 UcMem *UcMemPool::Alloc(bool &exceed_limit)
 {

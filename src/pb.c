@@ -77,7 +77,7 @@ static inline int pb_get_ddword(pb_field_t *f, uint64_t *buf)
 	return 0;
 }
 
-static inline int pb_decode_varint(pb_field_t *f)
+int pb_decode_varint(pb_field_t *f)
 {
 	uint8_t byte;
 	uint8_t bitpos = 0;
@@ -99,17 +99,17 @@ static inline int pb_decode_varint(pb_field_t *f)
 	return 0;
 }
 
-static inline int pb_decode_fixed32(pb_field_t *f)
+int pb_decode_fixed32(pb_field_t *f)
 {
 	return pb_get_dword(f, &f->val.i32);
 }
 
-static inline int pb_decode_fixed64(pb_field_t *f)
+int pb_decode_fixed64(pb_field_t *f)
 {
 	return pb_get_ddword(f, &f->val.i64);
 }
 
-static inline int pb_decode_string(pb_field_t *f)
+int pb_decode_string(pb_field_t *f)
 {
 	uint32_t sz;
 	if (pb_decode_varint(f))

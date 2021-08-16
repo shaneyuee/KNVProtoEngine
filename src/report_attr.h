@@ -38,12 +38,7 @@ enum KnvAttrs
 	ATTR_PROTO_PKG_NUM_SMALLER_THAN_EVAL_NUM = 392289
 };
 
-#ifdef HAS_ATTR_API
-extern "C" int Attr_API(unsigned int attr, unsigned int val);
-#else
-#define Attr_API(attr, val)
-#endif
-
+extern "C" int Attr_API(int attr, int val);
 
 #endif
 

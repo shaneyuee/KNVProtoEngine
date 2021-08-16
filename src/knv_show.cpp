@@ -26,15 +26,10 @@ void hex_squeeze(char *str)
 	while(*data)
 	{
 		if(isxdigit(*data)) 
-		{
-			*str++ = *data ++;
-		}
-		else
-		{
-			data ++; 
-		}
+			*str++ = *data;
+		data ++; 
 	}
-	*data = 0;
+	*str = 0;
 }
 
 
@@ -121,7 +116,7 @@ int show_oidb_bin(const char *bin_str, int len)
 	cout << prefix << "        Sequence: " << head->GetFieldInt(OidbHeadTag_Seq) << endl;
 	if(head->GetFieldInt(OidbHeadTag_ClientAddr))
 	{
-		struct in_addr in = { (in_addr_t) head->GetFieldInt(OidbHeadTag_ClientAddr) };
+		struct in_addr in = { (in_addr_t)head->GetFieldInt(OidbHeadTag_ClientAddr) };
 		cout << prefix << "        ClientAddr: " << inet_ntoa(in) << endl;
 	}
 	else if(head->GetFieldStr(OidbHeadTag_ClientAddrIpv6).length()>0)
@@ -131,7 +126,7 @@ int show_oidb_bin(const char *bin_str, int len)
 	}
 	if(head->GetFieldInt(OidbHeadTag_ServerAddr))
 	{
-		struct in_addr in = { (in_addr_t) head->GetFieldInt(OidbHeadTag_ServerAddr) };
+		struct in_addr in = { (in_addr_t)head->GetFieldInt(OidbHeadTag_ServerAddr) };
 		cout << prefix << "        ServiceAddr: " << inet_ntoa(in) << endl;
 	}
 	else if(head->GetFieldStr(OidbHeadTag_ServerAddrIpv6).length()>0)
@@ -152,12 +147,12 @@ int show_oidb_bin(const char *bin_str, int len)
 		cout << prefix << "        Flag: " << head->GetFieldInt(OidbHeadTag_Flag) << endl;
 	if(head->GetFieldInt(OidbHeadTag_FromAddr))
 	{
-		struct in_addr in = { (in_addr_t) head->GetFieldInt(OidbHeadTag_FromAddr) };
+		struct in_addr in = { (in_addr_t)head->GetFieldInt(OidbHeadTag_FromAddr) };
 		cout << prefix << "        FromAddr: " << inet_ntoa(in) << endl;
 	}
 	if(head->GetFieldInt(OidbHeadTag_LocalAddr))
 	{
-		struct in_addr in = { (in_addr_t) head->GetFieldInt(OidbHeadTag_LocalAddr) };
+		struct in_addr in = { (in_addr_t)head->GetFieldInt(OidbHeadTag_LocalAddr) };
 		cout << prefix << "        LocalAddr: " << inet_ntoa(in) << endl;
 	}
 	if(head->GetFieldInt(OidbHeadTag_ModuleId))
