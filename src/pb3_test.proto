@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package pb3test;
+
+message Person {
+  string name = 1;
+  repeated uint32 ids = 2 [packed=false];
+  repeated float schools = 3 ;//[packed=true];
+  repeated double interests = 4 [packed=true];
+  repeated sint64 friendids = 100;
+}
+
+message MsgBody {
+  Person person = 101;
+}
