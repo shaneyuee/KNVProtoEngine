@@ -21,7 +21,8 @@ KNV是专门针对以Protocol Buffers（或类似树型结构）存储的存储�
 
     原生态 Protocol Buffers打解包库 的高性能代替品。
 
-
+**设计原理**
+设计原理的说明文档：Key-N-Value--基于Protocol Buffers的树型协议处理引擎（https://blog.csdn.net/shaneyuee/article/details/136992263）
 -----
 
 
